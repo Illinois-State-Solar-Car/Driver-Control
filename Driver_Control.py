@@ -17,14 +17,14 @@ cs.switch_to_output()
 spi = busio.SPI(board.GP2, board.GP3, board.GP4)
 
 #digital reverse init
-reverse = digitalio.DigitalInOut(board.GP22)
+reverse = digitalio.DigitalInOut(board.GP20)
 reverse.pull= digitalio.Pull.UP
 
 #Maximum RPM value
 omega =0
 
 #digital forward init
-forward = digitalio.DigitalInOut(board.GP21)
+forward = digitalio.DigitalInOut(board.GP19)
 forward.pull = digitalio.Pull.UP
 
 #digital regen init
@@ -32,7 +32,7 @@ regen = digitalio.DigitalInOut(board.GP7)
 regen.pull= digitalio.Pull.UP
 
 #Analog value from the pedal
-pot = AnalogIn(board.A2)
+pot = AnalogIn(board.A0)
 potPercent = 0
 
 #The node id we are sending to the Motor Controller
