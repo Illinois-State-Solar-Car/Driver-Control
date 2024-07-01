@@ -31,6 +31,9 @@ forward.pull = digitalio.Pull.UP
 regen = digitalio.DigitalInOut(board.GP7)
 regen.pull= digitalio.Pull.UP
 
+
+pedal = digitalio.DigitalInOut(board.GP25)
+pedal.direction              = digitalio.Direction.OUTPUT
 #Analog value from the pedal
 pot = AnalogIn(board.A0)
 potPercent = 0
@@ -41,16 +44,20 @@ NODE_ID = 0x501
 #Initialize the CAN object, baudrate 500k, cpu clock
 mcp = CAN(spi, cs, baudrate = 500000, crystal_freq = 16000000, silent = False)
 
-"""
+
 t = Timer(timeout=5)
 next_message = None
 message_num = 0
 tire_diameter = 22
 last_send = time.monotonic_ns()
-"""
+pot_sum = 0
+sample_count = 0
+pedal.value = True
+start_time = time.monotonic()
 
 
 while True:
+    
     
     
    #grab pot value
@@ -58,94 +65,69 @@ while True:
     if potPercent < .05 :
         potPercent = 0
     
-    #model function to describe acceleration
-    thrust = (pow(potPercent,1.75))*.9
-   
-   
-       
-    #reverse selected   
-    if not reverse.value :
-        alpha= thrust
-        omega= - 1000
-
-
-    #forward selected
-    if not forward.value:
-        omega = 1000
-        alpha=potPercent
-
-    #regen selected
-    if not regen.value :
-        alpha = thrust*.40
-        omega = 0
-
-    #neutral select
-    if  forward.value and  reverse.value:
-        alpha = 0
-        omega = 0
-       
-    #print(potPercent)
-    #print (omega)
-   
-    #sleep(.1)
-
-    #Constructor for the Message object(packing two floats(%,maxrpm))
-    message = Message(id=0x501, data=struct.pack('<ff',omega,alpha), extended=False)
+    pot_sum += potPercent
+    sample_count += 1
     
-    #wait a little bit until you send another message
-    while time.monotonic_ns() - last_send < 100000000:
-        pass
-        
-
-    #send the message
-    send_success = mcp.send(message)
-
-
-    print("message sent after {}s".format((time.monotonic_ns()-last_send)*10**-9))
-    print(send_success)
-    
-    last_send = time.monotonic_ns()
-
-    '''
-    with mcp.listen(matches = [Match(0x400,mask = 0xFF0)], timeout=0) as listener:
+    if time.monotonic()-start_time >= 0.1:
+        this =pot_sum/sample_count
+        #model function to describe acceleration
+        thrust = (pow(this,1.75))*.9
+        thrust = round(thrust,3)
+        if thrust <=.01:
+            thrust = 0
        
-       
-       
-       
-        message_count = listener.in_waiting()
-
-       
-        if message_count == 0:
-           continue
-
-        next_message = listener.receive()
-        message_num = 0
-        while not next_message is None:
-            message_num += 1
-
-             # Check the id to properly unpack it
-            #if next_message.id == 0x402:
-
-            #unpack and print the message
-               # holder = struct.unpack('<ff',next_message.data)
-                #print(holder)
-
-            if next_message.id == 0x403:
-
-                #unpack and print the message
-                holder = struct.unpack('<ff',next_message.data)
-                rpm = holder[0]
-                mph = rpm*tire_diameter*math.pi*(60/63360)
-                print(mph)
-               
-            next_message = listener.receive()
-            #if next_message.id == 0x40e:
+        print(f"pot {potPercent}")
            
-                #holder = struct.unpack('<ff',next_message.data)
-                #odometer = holder[0]
-                #milesTraveled = 0.000621371*odometer
-                #print("Miles = "+((str)milesTraveled))
-            #ampHours = holder[1]
-            #print("AmpHrs = "+ampHours)
-            # Read another message why not... if no messages are avaliable None is returned
-            '''
+        #reverse selected   
+        if not reverse.value :
+            print(reverse)
+            alpha= thrust
+            omega= - 1000
+
+
+        #forward selected
+        if not forward.value:
+            omega = 1000
+            alpha=thrust
+            print("forward")
+
+        #regen selected
+        if not regen.value :
+            alpha = thrust*.40
+            omega = 0
+
+        #neutral select
+        if  forward.value and  reverse.value:
+            alpha = 0
+            omega = 0
+           
+        print(f"thrust {thrust}")
+        print (omega)
+        pot_sum = 0
+        sample_count = 0
+       
+    
+
+        #Constructor for the Message object(packing two floats(%,maxrpm))
+        message = Message(id=0x501, data=struct.pack('<ff',omega,alpha), extended=False)
+        
+        #wait a little bit until you send another message
+        while time.monotonic_ns() - last_send < 100000000:
+            pass
+            
+
+        #send the message
+        send_success = mcp.send(message)
+
+
+        print("message sent after {}s".format((time.monotonic_ns()-last_send)*10**-9))
+        print(send_success)
+        
+        last_send = time.monotonic_ns()
+        start_time = time.monotonic()
+
+        
+       
+       
+       
+     
