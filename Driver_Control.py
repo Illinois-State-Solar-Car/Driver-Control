@@ -9,7 +9,7 @@ from adafruit_mcp2515.canio import RemoteTransmissionRequest, Message, Match, Ti
 import math
 import time
 
-
+# NOTE: This code is goofy and does things with globals
 # Initalize the SPI bus on the RP2040
 # NOTE: Theses pins constant for all CAN-Pico Boards... DO NOT TOUCH
 cs = digitalio.DigitalInOut(board.GP9)
@@ -18,10 +18,10 @@ spi = busio.SPI(board.GP2, board.GP3, board.GP4)
 
 #digital reverse init
 reverse = digitalio.DigitalInOut(board.GP20)
-reverse.pull= digitalio.Pull.UP
+reverse.pull = digitalio.Pull.UP
 
 #Maximum RPM value
-omega =0
+omega = 0
 
 #digital forward init
 forward = digitalio.DigitalInOut(board.GP19)
@@ -29,104 +29,124 @@ forward.pull = digitalio.Pull.UP
 
 #digital regen init
 regen = digitalio.DigitalInOut(board.GP7)
-regen.pull= digitalio.Pull.UP
+regen.pull = digitalio.Pull.UP
 
 
 pedal = digitalio.DigitalInOut(board.GP25)
-pedal.direction              = digitalio.Direction.OUTPUT
+pedal.direction = digitalio.Direction.OUTPUT
 #Analog value from the pedal
 pot = AnalogIn(board.A0)
 potPercent = 0
-
 #The node id we are sending to the Motor Controller
 NODE_ID = 0x501
-
 #Initialize the CAN object, baudrate 500k, cpu clock
 mcp = CAN(spi, cs, baudrate = 500000, crystal_freq = 16000000, silent = False)
-
 
 t = Timer(timeout=5)
 next_message = None
 message_num = 0
 tire_diameter = 22
-last_send = time.monotonic_ns()
+last_send = time.monotonic_ns()#when our message was last sent
 pot_sum = 0
 sample_count = 0
 pedal.value = True
-start_time = time.monotonic()
+start_time = time.monotonic()#since initalization
+
+def main():
+    #these are used in like every function, so were making them globals
+    global potSum
+    global sample_count
+
+    # main data gathering and then message sending loop.
+    while True:
+        
+        #were summing data here until we actually send a message
+        potSum += get_potentionmeter_data()
+        sample_count +=1
+        
+        #This is if is basiclly just checking if 0.1 seconds have passed, since we reset start_time in the send_message function
+        if time.monotonic()-start_time >= 0.1:
+
+            maxrpm_thrust_list = forward_neutral_reverse_regen() # get our maxrpm and thrust depending on switch
+
+            omega = maxrpm_thrust_list[0]
+            alpha = maxrpm_thrust_list[1]
+
+            send_message_over_can(omega, alpha) # send our maxrpm and thrust over CAN
+
+            #reseting our data to zero before we begin sampling again
+
+            pot_sum = 0
+            sample_count = 0
+        
+def send_message_over_can(maxrpm, thrust_percentage):
+    '''This function is for sending the message of our calculatd maxrpm and percentage thrust over CAN, also updates our last_send and start_time variables to control how often we send messages'''
+    global last_send
+    global start_send
+
+    #we do this because I don't want to modify the original code too much lol
+    omega = maxrpm
+    alpha = thrust_percentage
+
+    #Constructor for the Message object(packing two floats(%,maxrpm))
+    message = Message(id=0x501, data=struct.pack('<ff',omega,alpha), extended=False)
+            
+    #wait a little bit until you send another message
+    while time.monotonic_ns() - last_send < 100000000:
+        pass
+                
+
+    #send the message
+    send_success = mcp.send(message)
 
 
-while True:
-    
-    
-    
-   #grab pot value
+    print("message sent after {}s".format((time.monotonic_ns()-last_send)*10**-9))
+    print(send_success)
+            
+    last_send = time.monotonic_ns()
+    start_time = time.monotonic()
+
+def get_potentionmeter_data():
+    '''Gets potentiometer data and adds it to sum, this data is then reset at the end of the main loop to 0. Basically, we're summing it until it actually send the data at which point we reset to zero and start counting up again'''
+    #pot means potentiometer I think
+    # calc stands for calculator guys
+    #grab pot value
     potPercent = (pot.value/63500)
     if potPercent < .05 :
         potPercent = 0
-    
-    pot_sum += potPercent
-    sample_count += 1
-    
-    if time.monotonic()-start_time >= 0.1:
-        this =pot_sum/sample_count
-        #model function to describe acceleration
-        thrust = (pow(this,1.75))*.9
-        thrust = round(thrust,3)
-        if thrust <=.01:
-            thrust = 0
-       
-        print(f"pot {potPercent}")
-           
-        #reverse selected   
-        if not reverse.value :
-            print(reverse)
-            alpha= thrust
-            omega= - 1000
-
-
-        #forward selected
-        if not forward.value:
-            omega = 1000
-            alpha=thrust
-            print("forward")
-
-        #regen selected
-        if not regen.value :
-            alpha = thrust*.40
-            omega = 0
-
-        #neutral select
-        if  forward.value and  reverse.value:
-            alpha = 0
-            omega = 0
-           
-        print(f"thrust {thrust}")
-        print (omega)
-        pot_sum = 0
-        sample_count = 0
-       
-    
-
-        #Constructor for the Message object(packing two floats(%,maxrpm))
-        message = Message(id=0x501, data=struct.pack('<ff',omega,alpha), extended=False)
         
-        #wait a little bit until you send another message
-        while time.monotonic_ns() - last_send < 100000000:
-            pass
-            
+    return potPercent
 
-        #send the message
-        send_success = mcp.send(message)
+def forward_neutral_reverse_regen():
+    '''detects forward, neutral, reverse, regen selction and returns a list that contains the correct omega[maxrpm] and alpha[percentage thrust] as 0 and 1 indicies in the list'''
+    #model function to describe acceleration
+    thrust = (pow(pot_sum/sample_count,1.75))*.9
+    thrust = round(thrust,3)
+    if thrust <=.01:#floating point bs
+        thrust = 0
 
+    print(f"pot {potPercent}")
+    
+    #reverse selected   
+    if not reverse.value:
+        return [-1000, thrust]
 
-        print("message sent after {}s".format((time.monotonic_ns()-last_send)*10**-9))
-        print(send_success)
-        
-        last_send = time.monotonic_ns()
-        start_time = time.monotonic()
+    #forward selected
+    if not forward.value:
+        return [1000, thrust]
 
-        
+    #regen selected
+    if not regen.value:
+        return [0, thrust*0.40]
+
+    #neutral select
+    if  forward.value and reverse.value:
+        return [0,0]
+
+    #THIS SHOULD NEVER BE REACHED, JUST PUTTING HERE JUST IN CASE
+    return [0,0]
+
+main()
        
        
        
