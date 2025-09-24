@@ -36,7 +36,6 @@ pedal = digitalio.DigitalInOut(board.GP25)
 pedal.direction = digitalio.Direction.OUTPUT
 #Analog value from the pedal
 pot = AnalogIn(board.A0)
-potPercent = 0
 #The node id we are sending to the Motor Controller
 NODE_ID = 0x501
 #Initialize the CAN object, baudrate 500k, cpu clock
@@ -47,42 +46,38 @@ next_message = None
 message_num = 0
 tire_diameter = 22
 last_send = time.monotonic_ns()#when our message was last sent
-pot_sum = 0
+pedal_potentiometer_sum = 0
 sample_count = 0
 pedal.value = True
 start_time = time.monotonic()#since initalization
 
 def main():
-    #these are used in like every function, so were making them globals
-    global potSum
-    global sample_count
-
-    # main data gathering and then message sending loop.
+    '''main data gathering and then message sending loop.'''
     while True:
         
         #were summing data here until we actually send a message
-        potSum += get_potentionmeter_data()
+        pedal_potentiometer_sum += get_pedal_data()
         sample_count +=1
         
         #This is if is basiclly just checking if 0.1 seconds have passed, since we reset start_time in the send_message function
         if time.monotonic()-start_time >= 0.1:
 
-            maxrpm_thrust_list = forward_neutral_reverse_regen() # get our maxrpm and thrust depending on switch
+            maxrpm_thrust_list = forward_neutral_reverse_regen(pedal_potentiometer_sum, sample_count) # get our maxrpm and thrust depending on switch
 
-            omega = maxrpm_thrust_list[0]
-            alpha = maxrpm_thrust_list[1]
+            maxrpm = maxrpm_thrust_list[0]
+            thrust_percentage = maxrpm_thrust_list[1]
 
-            send_message_over_can(omega, alpha) # send our maxrpm and thrust over CAN
+            send_message_over_can(maxrpm, thrust_percentage) # send our maxrpm and thrust over CAN
 
             #reseting our data to zero before we begin sampling again
 
-            pot_sum = 0
+            pedal_potentiometer_sum = 0
             sample_count = 0
-        
+            
 def send_message_over_can(maxrpm, thrust_percentage):
     '''This function is for sending the message of our calculatd maxrpm and percentage thrust over CAN, also updates our last_send and start_time variables to control how often we send messages'''
     global last_send
-    global start_send
+    global start_time
 
     #we do this because I don't want to modify the original code too much lol
     omega = maxrpm
@@ -106,26 +101,24 @@ def send_message_over_can(maxrpm, thrust_percentage):
     last_send = time.monotonic_ns()
     start_time = time.monotonic()
 
-def get_potentionmeter_data():
-    '''Gets potentiometer data and adds it to sum, this data is then reset at the end of the main loop to 0. Basically, we're summing it until it actually send the data at which point we reset to zero and start counting up again'''
+def get_pedal_data():
+    '''Gets pedal's potentiometer data and adds it to sum, this data is then reset at the end of the main loop to 0. Basically, we're summing it until it actually send the data at which point we reset to zero and start counting up again'''
     #pot means potentiometer I think
     # calc stands for calculator guys
-    #grab pot value
-    potPercent = (pot.value/63500)
-    if potPercent < .05 :
-        potPercent = 0
+    #grab pot value which is just pedal now that I acutally think about it
+    pedalPercent = (pot.value/63500)
+    if pedalPercent < .05 :#dead band
+        pedalPercent = 0
         
-    return potPercent
+    return pedalPercent
 
-def forward_neutral_reverse_regen():
+def forward_neutral_reverse_regen(pedal_potentiometer_sum, sample_count):
     '''detects forward, neutral, reverse, regen selction and returns a list that contains the correct omega[maxrpm] and alpha[percentage thrust] as 0 and 1 indicies in the list'''
     #model function to describe acceleration
-    thrust = (pow(pot_sum/sample_count,1.75))*.9
+    thrust = (pow(pedal_potentiometer_sum/sample_count,1.75))*.9
     thrust = round(thrust,3)
-    if thrust <=.01:#floating point bs
+    if thrust <=.01:#dead band on pedal
         thrust = 0
-
-    print(f"pot {potPercent}")
     
     #reverse selected   
     if not reverse.value:
