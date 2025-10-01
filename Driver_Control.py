@@ -54,6 +54,8 @@ start_time = time.monotonic()#since initalization
 def main():
     '''main data gathering and then message sending loop.'''
     while True:
+        global pedal_potentiometer_sum
+        global sample_count
         
         #were summing data here until we actually send a message
         pedal_potentiometer_sum += get_pedal_data()
@@ -67,7 +69,7 @@ def main():
             maxrpm = maxrpm_thrust_list[0]
             thrust_percentage = maxrpm_thrust_list[1]
 
-            send_message_over_can(maxrpm, thrust_percentage) # send our maxrpm and thrust over CAN
+            #send_message_over_can(maxrpm, thrust_percentage) # send our maxrpm and thrust over CAN
 
             #reseting our data to zero before we begin sampling again
 
